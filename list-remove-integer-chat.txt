@@ -1,0 +1,101 @@
+CSE11 live lecture chat: List.remove(int) vs remove(Object), and Integer caching
+Recorded 2026-11-12 with Claude (Claude Code desktop app)
+
+========================================================================
+
+[Instructor]
+YOOOO when did this start working
+
+[Claude]
+I'm not sure what "this" is yet. This is a fresh session, so I have no
+earlier context about what you were working on. Tell me what you saw and I
+can help work out when it changed.
+
+------------------------------------------------------------------------
+
+[Instructor]
+        // remove(int)
+        // remove(ElementType)
+        nums.remove((Integer)45);
+
+[Claude]
+It's worked since Java 5 (2004), when generics and autoboxing came in.
+Before that, you'd have written nums.remove(new Integer(45)), which picks
+the same overload.
+
+Why the cast matters: List has two remove methods:
+
+  - remove(int index)  removes the item at that position.
+  - remove(Object o)   removes the first item equal to o. (The comment says
+                       remove(ElementType), but it really takes Object. It
+                       was never made generic.)
+
+Java chooses between overloads in phases, and the first phase doesn't allow
+boxing or unboxing:
+
+  - nums.remove(45): 45 is an int, so remove(int) matches right away and it
+    removes INDEX 45. That usually throws IndexOutOfBoundsException, or
+    quietly removes the wrong item.
+  - nums.remove((Integer) 45): an Integer already fits Object, but would
+    need unboxing to fit int, so remove(Object) wins and it removes THE
+    VALUE 45.
+
+Two other ways to write it that some people find clearer:
+
+    nums.remove(Integer.valueOf(45));
+    nums.removeIf(x -> x == 45);   // removes every 45, not just the first
+
+------------------------------------------------------------------------
+
+[Instructor]
+Wait but doesn't it actually allocate?
+
+[Claude]
+For 45, no. The cast (Integer) 45 compiles to Integer.valueOf(45), and
+valueOf returns a cached object for values from -128 to 127. Those cached
+Integers are created once when the Integer class loads, so this call
+allocates nothing.
+
+It does allocate in these cases:
+
+  - Values outside the cache range, like (Integer) 1000. Each one creates a
+    new object, though the JIT can sometimes optimize that away with escape
+    analysis.
+  - new Integer(45) always allocates. (Correction to the earlier answer: it
+    has been deprecated since Java 9 and marked for removal since Java 16,
+    so don't use it.)
+
+Two related details:
+
+  - You can raise the cache's upper bound with -XX:AutoBoxCacheMax=<n>. The
+    lower bound is fixed at -128.
+  - The cache is also why == on boxed integers looks correct for small
+    numbers and fails for big ones. (Integer)127 == (Integer)127 is true,
+    but (Integer)128 == (Integer)128 is usually false, because 128 gives
+    two different objects.
+
+------------------------------------------------------------------------
+
+[Instructor]
+Ah so like (Integer)283764 *would* make a new reference
+
+[Claude]
+Yes. With default JVM settings, (Integer) 283764 creates a new Integer
+object every time it runs, so two evaluations give two different
+references:
+
+    Integer a = 283764, b = 283764;
+    a == b       // false (usually)
+    a.equals(b)  // true
+
+There are two caveats:
+
+  - Escape analysis: if the object never leaves the method, the JIT may
+    skip the allocation entirely. You can't see the difference from your
+    code, though, because == still behaves as if there are two objects.
+  - -XX:AutoBoxCacheMax: setting it to 283764 or higher would put that
+    value in the cache.
+
+For nums.remove((Integer) 283764), the new reference doesn't matter.
+remove(Object) compares with .equals(), not ==, so it still finds and
+removes the matching value.
